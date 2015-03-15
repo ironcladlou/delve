@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	sys "golang.org/x/sys/unix"
-
-	"github.com/derekparker/delve/dwarf/frame"
 )
 
 // ThreadContext represents a single thread in the traced process
@@ -129,74 +127,37 @@ func (thread *ThreadContext) Next() (err error) {
 		return err
 	}
 
-	_, l, _ := thread.Process.GoSymTable.PCToLine(pc)
-	ret := thread.ReturnAddressFromOffset(fde.ReturnAddressOffset(pc))
-	for {
-		if err = thread.Step(); err != nil {
-			return err
-		}
-
-		if pc, err = thread.CurrentPC(); err != nil {
-			return err
-		}
-
-		if !fde.Cover(pc) && pc != ret {
-			if err := thread.continueToReturnAddress(pc, fde); err != nil {
-				if _, ok := err.(InvalidAddressError); !ok {
-					return err
-				}
-			}
-			if pc, err = thread.CurrentPC(); err != nil {
-				return err
-			}
-		}
-
-		if _, nl, _ := thread.Process.GoSymTable.PCToLine(pc); nl != l {
-			break
-		}
+	loc := thread.Process.LineInfo.LocationInfoForPC(pc)
+	if loc.Delta < 0 {
+		loc = thread.Process.LineInfo.LocationInfoForFileLine(loc.File, loc.Line)
 	}
 
-	return nil
-}
+	for {
+		loc = thread.Process.LineInfo.NextLocation(loc.Address)
+		if loc.Address == pc {
+			continue
+		}
 
-func (thread *ThreadContext) continueToReturnAddress(pc uint64, fde *frame.FrameDescriptionEntry) error {
-	for !fde.Cover(pc) {
-		// Offset is 0 because we have just stepped into this function.
-		addr := thread.ReturnAddressFromOffset(0)
-		bp, err := thread.Process.Break(addr)
+		if loc.Address >= fde.End() {
+			ret := thread.ReturnAddressFromOffset(fde.ReturnAddressOffset(pc) - 8)
+			bp, _ := thread.Process.Break(ret)
+			if bp != nil {
+				bp.Temp = true
+			}
+			break
+		}
+
+		bp, err := thread.Process.Break(loc.Address)
 		if err != nil {
 			if _, ok := err.(BreakPointExistsError); !ok {
 				return err
 			}
+			continue
 		}
 		bp.Temp = true
-		// Ensure we cleanup after ourselves no matter what.
-		defer thread.clearTempBreakpoint(bp.Addr)
-
-		for {
-			err = thread.Continue()
-			if err != nil {
-				return err
-			}
-			// Wait on -1, just in case scheduler switches threads for this G.
-			wpid, err := trapWait(thread.Process, -1)
-			if err != nil {
-				return err
-			}
-			if wpid != thread.Id {
-				thread = thread.Process.Threads[wpid]
-			}
-			pc, err = thread.CurrentPC()
-			if err != nil {
-				return err
-			}
-			if (pc-1) == bp.Addr || pc == bp.Addr {
-				break
-			}
-		}
 	}
 
-	return nil
+	return thread.Continue()
 }
 
 // Takes an offset from RSP and returns the address of the
@@ -211,25 +172,4 @@ func (thread *ThreadContext) ReturnAddressFromOffset(offset int64) uint64 {
 	data := make([]byte, 8)
 	readMemory(thread, uintptr(retaddr), data)
 	return binary.LittleEndian.Uint64(data)
-}
-
-func (thread *ThreadContext) clearTempBreakpoint(pc uint64) error {
-	var software bool
-	if _, ok := thread.Process.BreakPoints[pc]; ok {
-		software = true
-	}
-	if _, err := thread.Process.Clear(pc); err != nil {
-		return err
-	}
-	if software {
-		// Reset program counter to our restored instruction.
-		regs, err := thread.Registers()
-		if err != nil {
-			return err
-		}
-
-		return regs.SetPC(thread, pc)
-	}
-
-	return nil
 }

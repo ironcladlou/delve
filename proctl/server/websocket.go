@@ -20,6 +20,7 @@ type WebsocketServer struct {
 	procManager     proctl.ProcessManager
 	commandHandlers map[api.CommandName]commandHandler
 	events          chan *api.Event
+	resyncInterval  time.Duration
 }
 
 type commandHandler func(proctl.ProcessManager, *api.Command, chan *api.Event) error
@@ -30,11 +31,17 @@ func NewWebsocketServer(procManager proctl.ProcessManager, listenAddr string, li
 		listenAddr:  listenAddr,
 		listenPort:  listenPort,
 		events:      make(chan *api.Event),
+		// TODO(danmace): value is probably insane, but nice for developing at the
+		// moment.
+		resyncInterval: 1 * time.Second,
 		commandHandlers: map[api.CommandName]commandHandler{
 			api.AddBreakPoint:    handleAddBreakPoint,
 			api.ClearBreakPoints: handleClearBreakPoints,
 			api.Detach:           handleDetach,
 			api.Kill:             handleKill,
+			api.Continue:         handleContinue,
+			api.Step:             handleStep,
+			api.Next:             handleNext,
 		},
 	}
 }
@@ -65,6 +72,7 @@ func (s *WebsocketServer) handleSocket(w http.ResponseWriter, r *http.Request) {
 	// TODO: graceful shutdown
 	go s.readCommands(conn)
 	go s.writeEvents(conn)
+	go s.resync(conn)
 }
 
 func (s *WebsocketServer) readCommands(conn *websocket.Conn) {
@@ -117,6 +125,18 @@ func (s *WebsocketServer) writeEvents(conn *websocket.Conn) {
 				// TODO: error handling
 				fmt.Printf("error writing event: %s\n", err)
 			}
+		}
+	}
+}
+
+// TODO(danmace): audit concurrency; this stuff should all be reads.
+func (s *WebsocketServer) resync(conn *websocket.Conn) {
+	ticker := time.NewTicker(s.resyncInterval)
+	for {
+		select {
+		case <-ticker.C:
+			notifyBreakPointsUpdated(s.procManager, s.events)
+			notifyThreadsUpdated(s.procManager, s.events)
 		}
 	}
 }
@@ -174,12 +194,45 @@ func handleAddBreakPoint(procManager proctl.ProcessManager, command *api.Command
 		return err
 	})
 
-	if err != nil {
-		return err
-	}
-
 	notifyBreakPointsUpdated(procManager, events)
-	return nil
+	return err
+}
+
+func handleContinue(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
+	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+		if proc.Exited() {
+			return nil
+		}
+		return proc.Continue()
+	})
+}
+
+func handleStep(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
+	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+		if proc.Exited() {
+			return nil
+		}
+		return proc.Step()
+	})
+}
+
+func handleNext(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
+	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+		if proc.Exited() {
+			return nil
+		}
+		return proc.Next()
+	})
+}
+
+func handleClear(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
+	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+		if proc.Exited() {
+			return nil
+		}
+		_, err := proc.Clear(command.Clear.BreakPoint)
+		return err
+	})
 }
 
 func notifyBreakPointsUpdated(procManager proctl.ProcessManager, events chan *api.Event) error {
@@ -225,8 +278,8 @@ func notifyBreakPointsUpdated(procManager proctl.ProcessManager, events chan *ap
 	return err
 }
 
-func notifyThreadsUpdated(processOps chan proctl.ProcessOp) *api.Event {
-	/*
+func notifyThreadsUpdated(procManager proctl.ProcessManager, events chan *api.Event) error {
+	err := procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		threads := []*api.Thread{}
 
 		for _, th := range proc.Threads {
@@ -265,13 +318,14 @@ func notifyThreadsUpdated(processOps chan proctl.ProcessOp) *api.Event {
 			threads = append(threads, thread)
 		}
 
-		return &api.Event{
+		events <- &api.Event{
 			Name: api.ThreadsUpdated,
 			ThreadsUpdated: &api.ThreadsUpdatedData{
 				Timestamp: time.Now().UnixNano(),
 				Threads:   threads,
 			},
 		}
-	*/
-	return nil
+		return nil
+	})
+	return err
 }

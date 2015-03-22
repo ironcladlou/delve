@@ -9,7 +9,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	//"strconv"
+	"strconv"
 	"strings"
 
 	api "github.com/derekparker/delve/api"
@@ -17,6 +17,7 @@ import (
 	"github.com/derekparker/delve/proctl"
 )
 
+// TODO(danmace): feed this an io.Writer?
 type cmdfunc func(client client.Interface, cache *cache, args ...string) error
 
 type command struct {
@@ -123,40 +124,29 @@ func (c *Commands) help(client client.Interface, cache *cache, ars ...string) er
 }
 
 func threads(client client.Interface, cache *cache, ars ...string) error {
-	/*
-		for _, th := range cache.threads {
-			prefix := "  "
-			if th.IsCurrent {
-				prefix = "* "
-			}
-			if th.CurrentLine != nil {
-				fmt.Printf("%sThread %d at %#v %s:%d %s\n",
-					prefix, th.ID, th.CurrentPC, th.CurrentLine.File,
-					th.CurrentLine.Line, th.CurrentLine.Name)
-			} else {
-				fmt.Printf("%sThread %d at %#v\n", prefix, th.ID, th.CurrentPC)
-			}
+	for _, th := range cache.threads {
+		prefix := "  "
+		if th.IsCurrent {
+			prefix = "* "
 		}
-	*/
+		if th.CurrentLine != nil {
+			fmt.Printf("%sThread %d at %#v %s:%d %s\n",
+				prefix, th.ID, th.CurrentPC, th.CurrentLine.File,
+				th.CurrentLine.Line, th.CurrentLine.Name)
+		} else {
+			fmt.Printf("%sThread %d at %#v\n", prefix, th.ID, th.CurrentPC)
+		}
+	}
 	return nil
 }
 
 func thread(client client.Interface, cache *cache, ars ...string) error {
-	/*
-		oldTid := p.CurrentThread.Id
-		tid, err := strconv.Atoi(ars[0])
-		if err != nil {
-			return err
-		}
+	tid, err := strconv.Atoi(ars[0])
+	if err != nil {
+		return err
+	}
 
-		err = p.SwitchThread(tid)
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("Switched from %d to %d\n", oldTid, tid)
-	*/
-	return nil
+	return client.SwitchThread(tid)
 }
 
 func goroutines(client client.Interface, cache *cache, ars ...string) error {
@@ -165,55 +155,28 @@ func goroutines(client client.Interface, cache *cache, ars ...string) error {
 }
 
 func cont(client client.Interface, cache *cache, ars ...string) error {
-	/*
-		err := p.Continue()
-		if err != nil {
-			return err
-		}
-
-		return printcontext(p)
-	*/
-	return nil
+	return client.Continue()
 }
 
 func step(client client.Interface, cache *cache, args ...string) error {
-	/*
-		err := p.Step()
-		if err != nil {
-			return err
-		}
-
-		return printcontext(p)
-	*/
-	return nil
+	return client.Step()
 }
 
 func next(client client.Interface, cache *cache, args ...string) error {
-	/*
-		err := p.Next()
-		if err != nil {
-			return err
-		}
-
-		return printcontext(p)
-	*/
-	return nil
+	return client.Next()
 }
 
 func clear(client client.Interface, cache *cache, args ...string) error {
-	/*
-		if len(args) == 0 {
-			return fmt.Errorf("not enough arguments")
-		}
+	if len(args) == 0 {
+		return fmt.Errorf("not enough arguments")
+	}
 
-		bp, err := p.ClearByLocation(args[0])
-		if err != nil {
-			return err
-		}
+	addr, err := strconv.ParseUint(args[0], 0, 64)
+	if err != nil {
+		return err
+	}
 
-		fmt.Printf("Breakpoint %d cleared at %#v for %s %s:%d\n", bp.ID, bp.Addr, bp.FunctionName, bp.File, bp.Line)
-	*/
-	return nil
+	return client.Clear(addr)
 }
 
 type ById []*api.BreakPoint
@@ -236,17 +199,7 @@ func breakpoint(client client.Interface, cache *cache, args ...string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("not enough arguments")
 	}
-
-	location := args[0]
-
-	err := client.AddBreakPoint(location)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Breakpoint set at %s\n", location)
-
-	return nil
+	return client.AddBreakPoint(args[0])
 }
 
 func printVar(client client.Interface, cache *cache, args ...string) error {

@@ -110,17 +110,19 @@ func (t *Term) handleEvents() {
 	for {
 		event, err := t.client.NextEvent()
 		if err != nil {
-			fmt.Printf("event error: %s", err)
+			fmt.Printf("event error: %s\n", err)
 			continue
 		}
 
-		fmt.Printf("received client event: %#v\n", event)
 		switch event.Name {
 		case api.BreakPointsUpdated:
-			// TODO: copy
+			// TODO(danmace): copy
 			t.cache.breakPoints = event.BreakPointsUpdated.BreakPoints
+		case api.ThreadsUpdated:
+			// TODO(danmace): copy
+			t.cache.threads = event.ThreadsUpdated.Threads
 		default:
-			fmt.Printf("unsupported event %s", event.Name)
+			fmt.Printf("unsupported event %s\n", event.Name)
 		}
 	}
 }

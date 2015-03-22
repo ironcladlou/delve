@@ -411,7 +411,6 @@ type ProcessManager struct {
 func (p *ProcessManager) Exec(f ProcessOp) error {
 	done := make(chan interface{})
 	p.Ops <- func(proc *DebuggedProcess) error {
-		fmt.Println("execing")
 		err := f(proc)
 		if err != nil {
 			done <- err

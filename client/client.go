@@ -12,18 +12,38 @@ import (
 	api "github.com/derekparker/delve/api"
 )
 
+// Interface represents a client connection to the debugging server.
 type Interface interface {
+	// Open establishes a connection to the debugger.
 	Open() error
+	// Close closes the connection to the debugger.
 	Close() error
-	AddBreakPoint(location string) error
-	ClearBreakPoints() error
-	Detach() error
-	Kill() error
+	// NextEvent blocks until it can return the next available debugger event.
 	NextEvent() (*api.Event, error)
+	// AddBreakPoint adds a breakpoint at location.
+	AddBreakPoint(location string) error
+	// ClearBreakPoint clears all existing breakpoints.
+	ClearBreakPoints() error
+	// Detach detaches the debugger from the process.
+	Detach() error
+	// Kill kills the process being debugged.
+	Kill() error
+	// SwitchThread switches the current debugger thread.
+	SwitchThread(ID int) error
+	// Continue resumes process execution.
+	Continue() error
+	// Step steps through the process.
+	Step() error
+	// Next steps over function calls.
+	Next() error
+	// Clear clears the breakpoint at addr.
+	Clear(addr uint64) error
 }
 
 var _ = Interface(&WebsocketClient{})
 
+// WebsockerClient communicates with the debugger via WebSockets.
+// Create a WebsocketClient using NewWebsocketClient.
 type WebsocketClient struct {
 	addr string
 	conn *websocket.Conn
@@ -103,4 +123,43 @@ func (c *WebsocketClient) Detach() error {
 
 func (c *WebsocketClient) Kill() error {
 	return nil
+}
+
+func (c *WebsocketClient) SwitchThread(ID int) error {
+	return c.writeMessage(&api.Command{
+		Name: api.SwitchThread,
+		SwitchThread: &api.SwitchThreadCommand{
+			ID: ID,
+		},
+	})
+}
+
+func (c *WebsocketClient) Continue() error {
+	return c.writeMessage(&api.Command{
+		Name:     api.Continue,
+		Continue: &api.ContinueCommand{},
+	})
+}
+
+func (c *WebsocketClient) Step() error {
+	return c.writeMessage(&api.Command{
+		Name: api.Step,
+		Step: &api.StepCommand{},
+	})
+}
+
+func (c *WebsocketClient) Next() error {
+	return c.writeMessage(&api.Command{
+		Name: api.Next,
+		Next: &api.NextCommand{},
+	})
+}
+
+func (c *WebsocketClient) Clear(addr uint64) error {
+	return c.writeMessage(&api.Command{
+		Name: api.Clear,
+		Clear: &api.ClearCommand{
+			BreakPoint: addr,
+		},
+	})
 }

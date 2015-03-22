@@ -1,5 +1,9 @@
 package api
 
+type Process struct {
+	Files []string `json:"files"`
+}
+
 type Thread struct {
 	ID          int     `json:"id"`
 	Status      uint32  `json:"status"`

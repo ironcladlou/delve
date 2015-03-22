@@ -114,15 +114,21 @@ func (c *WebsocketClient) AddBreakPoint(location string) error {
 }
 
 func (c *WebsocketClient) ClearBreakPoints() error {
-	return nil
+	return c.writeMessage(&api.Command{
+		Name: api.ClearBreakPoints,
+	})
 }
 
 func (c *WebsocketClient) Detach() error {
-	return nil
+	return c.writeMessage(&api.Command{
+		Name: api.Detach,
+	})
 }
 
 func (c *WebsocketClient) Kill() error {
-	return nil
+	return c.writeMessage(&api.Command{
+		Name: api.Kill,
+	})
 }
 
 func (c *WebsocketClient) SwitchThread(ID int) error {
@@ -136,22 +142,19 @@ func (c *WebsocketClient) SwitchThread(ID int) error {
 
 func (c *WebsocketClient) Continue() error {
 	return c.writeMessage(&api.Command{
-		Name:     api.Continue,
-		Continue: &api.ContinueCommand{},
+		Name: api.Continue,
 	})
 }
 
 func (c *WebsocketClient) Step() error {
 	return c.writeMessage(&api.Command{
 		Name: api.Step,
-		Step: &api.StepCommand{},
 	})
 }
 
 func (c *WebsocketClient) Next() error {
 	return c.writeMessage(&api.Command{
 		Name: api.Next,
-		Next: &api.NextCommand{},
 	})
 }
 

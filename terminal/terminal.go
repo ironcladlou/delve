@@ -23,6 +23,7 @@ type Term struct {
 }
 
 type cache struct {
+	process     *api.Process
 	breakPoints []*api.BreakPoint
 	threads     []*api.Thread
 }
@@ -32,7 +33,9 @@ func New(client client.Interface) *Term {
 		prompt: "(dlv) ",
 		line:   liner.NewLiner(),
 		client: client,
-		cache:  &cache{},
+		cache: &cache{
+			process: &api.Process{},
+		},
 	}
 }
 
@@ -115,12 +118,16 @@ func (t *Term) handleEvents() {
 		}
 
 		switch event.Name {
+		case api.Message:
+			fmt.Printf("server=> %s\n", event.Message.Body)
 		case api.BreakPointsUpdated:
 			// TODO(danmace): copy
 			t.cache.breakPoints = event.BreakPointsUpdated.BreakPoints
 		case api.ThreadsUpdated:
 			// TODO(danmace): copy
 			t.cache.threads = event.ThreadsUpdated.Threads
+		case api.FilesUpdated:
+			t.cache.process.Files = event.FilesUpdated.Files
 		default:
 			fmt.Printf("unsupported event %s\n", event.Name)
 		}
@@ -143,13 +150,9 @@ func handleExit(client client.Interface, t *Term, status int) {
 	answer = strings.TrimSuffix(answer, "\n")
 
 	client.ClearBreakPoints()
-
-	fmt.Println("Detaching from process...")
 	client.Detach()
 
 	if answer == "y" {
-		fmt.Println("Killing process")
-
 		client.Kill()
 	}
 

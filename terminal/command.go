@@ -235,71 +235,69 @@ func filterVariables(vars []*proctl.Variable, filter *regexp.Regexp) []string {
 }
 
 func info(client client.Interface, cache *cache, args ...string) error {
-	/*
-		if len(args) == 0 {
-			return fmt.Errorf("not enough arguments. expected info type [regex].")
-		}
+	if len(args) == 0 {
+		return fmt.Errorf("not enough arguments. expected info type [regex].")
+	}
 
-		// Allow for optional regex
-		var filter *regexp.Regexp
-		if len(args) >= 2 {
-			var err error
-			if filter, err = regexp.Compile(args[1]); err != nil {
-				return fmt.Errorf("invalid filter argument: %s", err.Error())
+	// Allow for optional regex
+	var filter *regexp.Regexp
+	if len(args) >= 2 {
+		var err error
+		if filter, err = regexp.Compile(args[1]); err != nil {
+			return fmt.Errorf("invalid filter argument: %s", err.Error())
+		}
+	}
+
+	var data []string
+
+	switch args[0] {
+	case "sources":
+		for _, f := range cache.process.Files {
+			if filter == nil || filter.Match([]byte(f)) {
+				data = append(data, f)
 			}
 		}
 
-		var data []string
-
-		switch args[0] {
-		case "sources":
-			data = make([]string, 0, len(p.GoSymTable.Files))
-			for f := range p.GoSymTable.Files {
-				if filter == nil || filter.Match([]byte(f)) {
-					data = append(data, f)
+		/*
+			case "funcs":
+				data = make([]string, 0, len(p.GoSymTable.Funcs))
+				for _, f := range p.GoSymTable.Funcs {
+					if f.Sym != nil && (filter == nil || filter.Match([]byte(f.Name))) {
+						data = append(data, f.Name)
+					}
 				}
-			}
 
-		case "funcs":
-			data = make([]string, 0, len(p.GoSymTable.Funcs))
-			for _, f := range p.GoSymTable.Funcs {
-				if f.Sym != nil && (filter == nil || filter.Match([]byte(f.Name))) {
-					data = append(data, f.Name)
+			case "args":
+				vars, err := p.CurrentThread.FunctionArguments()
+				if err != nil {
+					return nil
 				}
-			}
+				data = filterVariables(vars, filter)
 
-		case "args":
-			vars, err := p.CurrentThread.FunctionArguments()
-			if err != nil {
-				return nil
-			}
-			data = filterVariables(vars, filter)
+			case "locals":
+				vars, err := p.CurrentThread.LocalVariables()
+				if err != nil {
+					return nil
+				}
+				data = filterVariables(vars, filter)
 
-		case "locals":
-			vars, err := p.CurrentThread.LocalVariables()
-			if err != nil {
-				return nil
-			}
-			data = filterVariables(vars, filter)
+			case "vars":
+				vars, err := p.CurrentThread.PackageVariables()
+				if err != nil {
+					return nil
+				}
+				data = filterVariables(vars, filter)
+		*/
+	default:
+		return fmt.Errorf("unsupported info type, must be args, funcs, locals, sources, or vars")
+	}
 
-		case "vars":
-			vars, err := p.CurrentThread.PackageVariables()
-			if err != nil {
-				return nil
-			}
-			data = filterVariables(vars, filter)
+	// sort and output data
+	sort.Sort(sort.StringSlice(data))
 
-		default:
-			return fmt.Errorf("unsupported info type, must be args, funcs, locals, sources, or vars")
-		}
-
-		// sort and output data
-		sort.Sort(sort.StringSlice(data))
-
-		for _, d := range data {
-			fmt.Println(d)
-		}
-	*/
+	for _, d := range data {
+		fmt.Println(d)
+	}
 	return nil
 }
 

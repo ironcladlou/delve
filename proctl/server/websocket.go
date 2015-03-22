@@ -17,31 +17,37 @@ import (
 type WebsocketServer struct {
 	listenAddr      string
 	listenPort      int
-	procManager     proctl.ProcessManager
-	commandHandlers map[api.CommandName]commandHandler
 	events          chan *api.Event
 	resyncInterval  time.Duration
+	debugger        *Debugger
+	commandHandlers map[api.CommandName]commandHandler
 }
 
-type commandHandler func(proctl.ProcessManager, *api.Command, chan *api.Event) error
+type commandHandler func(*api.Command) error
 
 func NewWebsocketServer(procManager proctl.ProcessManager, listenAddr string, listenPort int) *WebsocketServer {
-	return &WebsocketServer{
+	events := make(chan *api.Event)
+	debugger := &Debugger{
 		procManager: procManager,
-		listenAddr:  listenAddr,
-		listenPort:  listenPort,
-		events:      make(chan *api.Event),
+		events:      events,
+	}
+	return &WebsocketServer{
+		listenAddr: listenAddr,
+		listenPort: listenPort,
+		events:     events,
 		// TODO(danmace): value is probably insane, but nice for developing at the
 		// moment.
 		resyncInterval: 1 * time.Second,
+		debugger:       debugger,
 		commandHandlers: map[api.CommandName]commandHandler{
-			api.AddBreakPoint:    handleAddBreakPoint,
-			api.ClearBreakPoints: handleClearBreakPoints,
-			api.Detach:           handleDetach,
-			api.Kill:             handleKill,
-			api.Continue:         handleContinue,
-			api.Step:             handleStep,
-			api.Next:             handleNext,
+			api.AddBreakPoint:    debugger.AddBreakPoint,
+			api.Clear:            debugger.Clear,
+			api.ClearBreakPoints: debugger.ClearBreakPoints,
+			api.Detach:           debugger.Detach,
+			api.Kill:             debugger.Kill,
+			api.Continue:         debugger.Continue,
+			api.Step:             debugger.Step,
+			api.Next:             debugger.Next,
 		},
 	}
 }
@@ -104,7 +110,7 @@ func (s *WebsocketServer) readCommands(conn *websocket.Conn) {
 			continue
 		}
 
-		err = handler(s.procManager, command, s.events)
+		err = handler(command)
 		if err != nil {
 			// TODO: error handling
 			fmt.Printf("handler error: %s\n", err)
@@ -130,39 +136,56 @@ func (s *WebsocketServer) writeEvents(conn *websocket.Conn) {
 }
 
 // TODO(danmace): audit concurrency; this stuff should all be reads.
+// TODO(danmace): drive this from events deeper down in proctl.
 func (s *WebsocketServer) resync(conn *websocket.Conn) {
 	ticker := time.NewTicker(s.resyncInterval)
 	for {
 		select {
 		case <-ticker.C:
-			notifyBreakPointsUpdated(s.procManager, s.events)
-			notifyThreadsUpdated(s.procManager, s.events)
+			s.debugger.NotifyBreakPointsUpdated()
+			s.debugger.NotifyThreadsUpdated()
+			// TODO(danmace): this should only need to happen once or on demand.
+			s.debugger.NotifyFilesUpdated()
 		}
 	}
 }
 
-func handleDetach(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
-	err := procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+type Debugger struct {
+	procManager proctl.ProcessManager
+	events      chan *api.Event
+}
+
+func (d *Debugger) sendMessage(body string) {
+	d.events <- &api.Event{
+		Name: api.Message,
+		Message: &api.MessageData{
+			Body: body,
+		},
+	}
+}
+
+func (d *Debugger) Detach(command *api.Command) error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		if proc.Exited() {
 			return nil
 		}
+		d.sendMessage("Detaching from process")
 		return sys.PtraceDetach(proc.Process.Pid)
 	})
-	return err
 }
 
-func handleKill(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
-	err := procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) Kill(command *api.Command) error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		if proc.Exited() {
 			return nil
 		}
+		d.sendMessage("Killing process")
 		return proc.Process.Kill()
 	})
-	return err
 }
 
-func handleClearBreakPoints(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
-	err := procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) ClearBreakPoints(command *api.Command) error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		if proc.Exited() {
 			return nil
 		}
@@ -181,25 +204,27 @@ func handleClearBreakPoints(procManager proctl.ProcessManager, command *api.Comm
 				fmt.Printf("Can't clear breakpoint @%x: %s\n", pc, err)
 			}
 		}
+		d.sendMessage("Cleared all breakpoints")
 		return nil
 	})
-	return err
 }
 
-func handleAddBreakPoint(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
+func (d *Debugger) AddBreakPoint(command *api.Command) error {
 	loc := command.AddBreakPoint.Location
 
-	err := procManager.Exec(func(proc *proctl.DebuggedProcess) error {
-		_, err := proc.BreakByLocation(loc)
+	err := d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+		bp, err := proc.BreakByLocation(loc)
+		d.sendMessage(fmt.Sprintf(
+			"Breakpoint %d set at %#v for %s %s:%d\n", bp.ID, bp.Addr, bp.FunctionName, bp.File, bp.Line))
 		return err
 	})
 
-	notifyBreakPointsUpdated(procManager, events)
+	d.NotifyBreakPointsUpdated()
 	return err
 }
 
-func handleContinue(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
-	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) Continue(command *api.Command) error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		if proc.Exited() {
 			return nil
 		}
@@ -207,8 +232,8 @@ func handleContinue(procManager proctl.ProcessManager, command *api.Command, eve
 	})
 }
 
-func handleStep(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
-	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) Step(command *api.Command) error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		if proc.Exited() {
 			return nil
 		}
@@ -216,8 +241,8 @@ func handleStep(procManager proctl.ProcessManager, command *api.Command, events 
 	})
 }
 
-func handleNext(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
-	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) Next(command *api.Command) error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		if proc.Exited() {
 			return nil
 		}
@@ -225,8 +250,8 @@ func handleNext(procManager proctl.ProcessManager, command *api.Command, events 
 	})
 }
 
-func handleClear(procManager proctl.ProcessManager, command *api.Command, events chan *api.Event) error {
-	return procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) Clear(command *api.Command) error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		if proc.Exited() {
 			return nil
 		}
@@ -235,8 +260,8 @@ func handleClear(procManager proctl.ProcessManager, command *api.Command, events
 	})
 }
 
-func notifyBreakPointsUpdated(procManager proctl.ProcessManager, events chan *api.Event) error {
-	err := procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) NotifyBreakPointsUpdated() error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		bps := []*api.BreakPoint{}
 		for _, bp := range proc.HWBreakPoints {
 			if bp == nil {
@@ -264,7 +289,7 @@ func notifyBreakPointsUpdated(procManager proctl.ProcessManager, events chan *ap
 			})
 		}
 
-		events <- &api.Event{
+		d.events <- &api.Event{
 			Name: api.BreakPointsUpdated,
 			BreakPointsUpdated: &api.BreakPointsUpdatedData{
 				Timestamp:   time.Now().UnixNano(),
@@ -274,12 +299,10 @@ func notifyBreakPointsUpdated(procManager proctl.ProcessManager, events chan *ap
 
 		return nil
 	})
-
-	return err
 }
 
-func notifyThreadsUpdated(procManager proctl.ProcessManager, events chan *api.Event) error {
-	err := procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+func (d *Debugger) NotifyThreadsUpdated() error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
 		threads := []*api.Thread{}
 
 		for _, th := range proc.Threads {
@@ -318,7 +341,7 @@ func notifyThreadsUpdated(procManager proctl.ProcessManager, events chan *api.Ev
 			threads = append(threads, thread)
 		}
 
-		events <- &api.Event{
+		d.events <- &api.Event{
 			Name: api.ThreadsUpdated,
 			ThreadsUpdated: &api.ThreadsUpdatedData{
 				Timestamp: time.Now().UnixNano(),
@@ -327,5 +350,20 @@ func notifyThreadsUpdated(procManager proctl.ProcessManager, events chan *api.Ev
 		}
 		return nil
 	})
-	return err
+}
+
+func (d *Debugger) NotifyFilesUpdated() error {
+	return d.procManager.Exec(func(proc *proctl.DebuggedProcess) error {
+		files := []string{}
+		for f := range proc.GoSymTable.Files {
+			files = append(files, f)
+		}
+		d.events <- &api.Event{
+			Name: api.FilesUpdated,
+			FilesUpdated: &api.FilesUpdatedData{
+				Files: files,
+			},
+		}
+		return nil
+	})
 }

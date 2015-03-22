@@ -39,16 +39,6 @@ func New(client client.Interface) *Term {
 	}
 }
 
-func (t *Term) die(status int, args ...interface{}) {
-	if t.line != nil {
-		t.line.Close()
-	}
-
-	fmt.Fprint(os.Stderr, args)
-	fmt.Fprint(os.Stderr, "\n")
-	os.Exit(status)
-}
-
 func (t *Term) promptForInput() (string, error) {
 	l, err := t.line.Prompt(t.prompt)
 	if err != nil {
@@ -63,9 +53,10 @@ func (t *Term) promptForInput() (string, error) {
 	return l, nil
 }
 
-func (t *Term) Run() {
+func (t *Term) Run() (error, int) {
 	defer t.line.Close()
 
+	// TODO(danmace): client should return a channel for events
 	go t.handleEvents()
 
 	cmds := DebugCommands(t.cache, t.client)
@@ -85,15 +76,15 @@ func (t *Term) Run() {
 
 		if err != nil {
 			if err == io.EOF {
-				handleExit(t.client, t, 0)
+				return handleExit(t.client, t)
 			}
-			t.die(1, "Prompt for input failed.\n")
+			return fmt.Errorf("Prompt for input failed.\n"), 1
 		}
 
 		cmdstr, args := parseCommand(cmdstr)
 
 		if cmdstr == "exit" {
-			handleExit(t.client, t, 0)
+			return handleExit(t.client, t)
 		}
 
 		cmd := cmds.Find(cmdstr)
@@ -134,7 +125,7 @@ func (t *Term) handleEvents() {
 	}
 }
 
-func handleExit(client client.Interface, t *Term, status int) {
+func handleExit(client client.Interface, t *Term) (error, int) {
 	if f, err := os.OpenFile(historyFile, os.O_RDWR, 0666); err == nil {
 		_, err := t.line.WriteHistory(f)
 		if err != nil {
@@ -145,7 +136,7 @@ func handleExit(client client.Interface, t *Term, status int) {
 
 	answer, err := t.line.Prompt("Would you like to kill the process? [y/n]")
 	if err != nil {
-		t.die(2, io.EOF)
+		return io.EOF, 2
 	}
 	answer = strings.TrimSuffix(answer, "\n")
 
@@ -156,7 +147,7 @@ func handleExit(client client.Interface, t *Term, status int) {
 		client.Kill()
 	}
 
-	t.die(status, "Hope I was of service hunting your bug!")
+	return nil, 0
 }
 
 func parseCommand(cmdstr string) (string, []string) {

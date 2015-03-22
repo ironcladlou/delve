@@ -19,6 +19,7 @@ type Interface interface {
 	// Close closes the connection to the debugger.
 	Close() error
 	// NextEvent blocks until it can return the next available debugger event.
+	// TODO(danmace): return a channel instead
 	NextEvent() (*api.Event, error)
 	// AddBreakPoint adds a breakpoint at location.
 	AddBreakPoint(location string) error

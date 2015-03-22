@@ -7,16 +7,15 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
-	"strconv"
+	"sync"
 	"time"
 
 	sys "golang.org/x/sys/unix"
 
-	client "github.com/derekparker/delve/client"
-	proctl "github.com/derekparker/delve/proctl"
-	server "github.com/derekparker/delve/proctl/server"
-	terminal "github.com/derekparker/delve/terminal"
+	"github.com/derekparker/delve/client"
+	"github.com/derekparker/delve/proctl/server"
+	"github.com/derekparker/delve/proctl/server/websocket"
+	"github.com/derekparker/delve/terminal"
 )
 
 const version string = "0.5.0.beta"
@@ -36,13 +35,6 @@ or use the following commands:
   attach - Attach to running process
 `, version)
 
-func init() {
-	// We must ensure here that we are running on the same thread during
-	// the execution of dbg. This is due to the fact that ptrace(2) expects
-	// all commands after PTRACE_ATTACH to come from the same thread.
-	runtime.LockOSThread()
-}
-
 func main() {
 	var printv bool
 
@@ -59,9 +51,39 @@ func main() {
 		os.Exit(0)
 	}
 
-	process, err := makeAndAttach(os.Args[1:])
+	launchArgs, err := buildLaunchArgs(os.Args[1:])
 	if err != nil {
 		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	shutdown := make(chan bool)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	debugger := server.NewDebugger(shutdown)
+	go func() {
+		debugger.Run(launchArgs)
+		wg.Done()
+	}()
+
+	wsServer := &websocket.WebsocketServer{
+		Debugger:   debugger,
+		ListenAddr: "127.0.0.1",
+		ListenPort: 9223,
+		Shutdown:   shutdown,
+	}
+	go func() {
+		wsServer.Run()
+		//TODO: use an http listener with shutdown support
+		// wg.Done()
+	}()
+
+	// TODO: fix connection timeout handling
+	time.Sleep(500 * time.Millisecond)
+	client := client.NewWebsocketClient(wsServer.URL())
+	if err := client.Open(); err != nil {
+		fmt.Printf("error creating client: %s", err)
 		os.Exit(1)
 	}
 
@@ -70,55 +92,31 @@ func main() {
 	signal.Notify(ch, sys.SIGINT)
 	go func() {
 		for range ch {
-			if process.Running() {
-				fmt.Println("Requesting manual stop")
-				process.RequestManualStop()
-			}
+			// TODO: what should we do here?
+			/*
+				if process.Running() {
+					fmt.Println("Requesting manual stop")
+					process.RequestManualStop()
+				}
+			*/
 		}
 	}()
 
-	processOps := make(chan proctl.ProcessOp)
-	procManager := proctl.ProcessManager{Ops: processOps}
-	// start servers
-	listenAddr := "127.0.0.1"
-	listenPort := 9223
-
-	startServer(listenAddr, listenPort, procManager)
-	time.Sleep(500 * time.Millisecond)
-	startTerminal(listenAddr, listenPort)
-
-	// begin handling process operation requests
-	for {
-		select {
-		case op := <-processOps:
-			op(process)
-		}
-	}
-}
-
-func startServer(listenAddr string, listenPort int, procManager proctl.ProcessManager) {
-	fmt.Printf("Server listening on %s:%d\n", listenAddr, listenPort)
-	server := server.NewWebsocketServer(procManager, listenAddr, listenPort)
-	server.Run()
-}
-
-func startTerminal(listenAddr string, listenPort int) {
-	addr := fmt.Sprintf("ws://%s:%d", listenAddr, listenPort)
-	fmt.Printf("Attaching client to %s\n", addr)
-
-	client := client.NewWebsocketClient(addr)
-	if err := client.Open(); err != nil {
-		fmt.Printf("error creating client: %s", err)
-		os.Exit(1)
-	}
 	term := terminal.New(client)
-	go term.Run()
+	err, status := term.Run()
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	shutdown <- true
+	fmt.Print("waiting for debugger and server to shut down...")
+	wg.Wait()
+	fmt.Println(" done.")
+
+	os.Exit(status)
 }
 
-func makeAndAttach(args []string) (*proctl.DebuggedProcess, error) {
-	var dbp *proctl.DebuggedProcess
-	var err error
-
+func buildLaunchArgs(args []string) ([]string, error) {
 	switch args[0] {
 	case "run":
 		const debugname = "debug"
@@ -129,10 +127,7 @@ func makeAndAttach(args []string) (*proctl.DebuggedProcess, error) {
 		}
 		defer os.Remove(debugname)
 
-		dbp, err = proctl.Launch(append([]string{"./" + debugname}, args...))
-		if err != nil {
-			return nil, fmt.Errorf("Could not launch program: %s", err)
-		}
+		return append([]string{"./" + debugname}, args...), nil
 	case "test":
 		wd, err := os.Getwd()
 		if err != nil {
@@ -147,25 +142,19 @@ func makeAndAttach(args []string) (*proctl.DebuggedProcess, error) {
 		debugname := "./" + base + ".test"
 		defer os.Remove(debugname)
 
-		dbp, err = proctl.Launch(append([]string{debugname}, args...))
-		if err != nil {
-			return nil, fmt.Errorf("Could not launch program: %s", err)
-		}
-	case "attach":
-		pid, err := strconv.Atoi(args[1])
-		if err != nil {
-			return nil, fmt.Errorf("Invalid pid: %d", args[1])
-		}
-		dbp, err = proctl.Attach(pid)
-		if err != nil {
-			return nil, fmt.Errorf("Could not attach to process: %s", err)
-		}
+		return append([]string{debugname}, args...), nil
+		/*
+			case "attach":
+				pid, err := strconv.Atoi(args[1])
+				if err != nil {
+					return nil, fmt.Errorf("Invalid pid: %d", args[1])
+				}
+				dbp, err = proctl.Attach(pid)
+				if err != nil {
+					return nil, fmt.Errorf("Could not attach to process: %s", err)
+				}
+		*/
 	default:
-		dbp, err = proctl.Launch(args)
-		if err != nil {
-			return nil, fmt.Errorf("Could not launch program: %s", err)
-		}
+		return args, nil
 	}
-
-	return dbp, nil
 }

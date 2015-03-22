@@ -401,27 +401,3 @@ func (dbp *DebuggedProcess) run(fn func() error) error {
 	}
 	return nil
 }
-
-type ProcessOp func(*DebuggedProcess) error
-
-type ProcessManager struct {
-	Ops chan ProcessOp
-}
-
-func (p *ProcessManager) Exec(f ProcessOp) error {
-	done := make(chan interface{})
-	p.Ops <- func(proc *DebuggedProcess) error {
-		err := f(proc)
-		if err != nil {
-			done <- err
-		} else {
-			done <- struct{}{}
-		}
-		return nil
-	}
-	result := <-done
-	if e, ok := result.(error); ok {
-		return e
-	}
-	return nil
-}

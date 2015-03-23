@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/glog"
 	sys "golang.org/x/sys/unix"
 
 	"github.com/derekparker/delve/client"
@@ -38,7 +39,7 @@ or use the following commands:
 func main() {
 	var printv bool
 
-	flag.BoolVar(&printv, "v", false, "Print version number and exit.")
+	flag.BoolVar(&printv, "version", false, "Print version number and exit.")
 	flag.Parse()
 
 	if flag.NFlag() == 0 && len(flag.Args()) == 0 {
@@ -51,30 +52,37 @@ func main() {
 		os.Exit(0)
 	}
 
-	launchArgs, err := buildLaunchArgs(os.Args[1:])
+	launchArgs, err := buildLaunchArgs(flag.Args())
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	shutdown := make(chan bool)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
-	debugger := server.NewDebugger(shutdown)
+	stopDebugger := make(chan bool)
+	debugger := server.NewDebugger(stopDebugger)
 	go func() {
-		debugger.Run(launchArgs)
+		err := debugger.Run(launchArgs)
+		if err != nil {
+			fmt.Printf("debugger error: %s\n", err)
+		}
 		wg.Done()
 	}()
 
+	stopWebserver := make(chan bool)
 	wsServer := &websocket.WebsocketServer{
 		Debugger:   debugger,
 		ListenAddr: "127.0.0.1",
 		ListenPort: 9223,
-		Shutdown:   shutdown,
+		Shutdown:   stopWebserver,
 	}
 	go func() {
-		wsServer.Run()
+		err := wsServer.Run()
+		if err != nil {
+			fmt.Printf("websocket server error: %s\n", err)
+		}
 		//TODO: use an http listener with shutdown support
 		// wg.Done()
 	}()
@@ -108,11 +116,17 @@ func main() {
 		fmt.Println(err)
 	}
 
-	shutdown <- true
-	fmt.Print("waiting for debugger and server to shut down...")
-	wg.Wait()
-	fmt.Println(" done.")
+	err = client.Close()
+	if err != nil {
+		fmt.Printf("error closing client: %s\n", err)
+	}
 
+	stopDebugger <- true
+	// TODO: shut down websocket server
+	fmt.Println("Waiting for debugger and server to shut down...")
+	wg.Wait()
+
+	glog.Flush()
 	os.Exit(status)
 }
 

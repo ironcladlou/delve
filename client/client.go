@@ -18,9 +18,8 @@ type Interface interface {
 	Open() error
 	// Close closes the connection to the debugger.
 	Close() error
-	// NextEvent blocks until it can return the next available debugger event.
-	// TODO(danmace): return a channel instead
-	NextEvent() (*api.Event, error)
+	// Events provides a debugger event channel.
+	Events() (chan *api.Event, error)
 	// AddBreakPoint adds a breakpoint at location.
 	AddBreakPoint(location string) error
 	// ClearBreakPoint clears all existing breakpoints.
@@ -84,25 +83,35 @@ func (c *WebsocketClient) Close() error {
 	return c.conn.Close()
 }
 
-func (c *WebsocketClient) NextEvent() (*api.Event, error) {
-	messageType, message, err := c.conn.ReadMessage()
-	if err != nil {
-		return nil, err
-	}
+func (c *WebsocketClient) Events() (chan *api.Event, error) {
+	events := make(chan *api.Event)
+	go func() {
+		for {
+			messageType, message, err := c.conn.ReadMessage()
+			if err != nil {
+				// TODO: logging
+				fmt.Printf("event reader stopped: %s\n", err)
+				close(events)
+				return
+			}
 
-	if messageType != websocket.TextMessage {
-		// TODO: error handling
-		return nil, fmt.Errorf("invalid message type %s", messageType)
-	}
+			if messageType != websocket.TextMessage {
+				// TODO: error handling
+				fmt.Printf("invalid message type %s\n", messageType)
+			}
 
-	dec := json.NewDecoder(strings.NewReader(string(message)))
+			dec := json.NewDecoder(strings.NewReader(string(message)))
 
-	var event *api.Event
-	if err := dec.Decode(&event); err != nil {
-		return nil, err
-	}
+			var event *api.Event
+			if err := dec.Decode(&event); err != nil {
+				// TODO: error handling
+				fmt.Printf("couldn't decode event: %s\n", err)
+			}
 
-	return event, nil
+			events <- event
+		}
+	}()
+	return events, nil
 }
 
 func (c *WebsocketClient) AddBreakPoint(location string) error {

@@ -1,7 +1,9 @@
 package api
 
 type Process struct {
-	Files []string `json:"files"`
+	Files  []string `json:"files"`
+	Exited bool     `json:"exited"`
+	Status uint32   `json:"status"`
 }
 
 type Thread struct {

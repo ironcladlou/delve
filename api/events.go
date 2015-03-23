@@ -49,7 +49,7 @@ type Event struct {
 	Message            *MessageData            `json:"message,omitempty"`
 	ThreadsUpdated     *ThreadsUpdatedData     `json:"threadsUpdated,omitempty"`
 	BreakPointsUpdated *BreakPointsUpdatedData `json:"breakPointsUpdated,omitempty"`
-	FilesUpdated       *FilesUpdatedData       `json:"filesUpdated"`
+	ProcessUpdated     *ProcessUpdatedData     `json:"processUpdated"`
 }
 
 type EventName string
@@ -58,7 +58,7 @@ const (
 	Message            EventName = "Message"
 	ThreadsUpdated     EventName = "ThreadsUpdated"
 	BreakPointsUpdated EventName = "BreakPointsUpdated"
-	FilesUpdated       EventName = "FilesUpdated"
+	ProcessUpdated     EventName = "ProcessUpdated"
 )
 
 type EmptyEventData struct{}
@@ -80,6 +80,6 @@ type MessageData struct {
 	IsError bool   `json:"isError"`
 }
 
-type FilesUpdatedData struct {
-	Files []string `json:"files"`
+type ProcessUpdatedData struct {
+	Process *Process `json:"process"`
 }

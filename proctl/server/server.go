@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/golang/glog"
 	sys "golang.org/x/sys/unix"
 
 	api "github.com/derekparker/delve/api"
@@ -51,6 +52,7 @@ func (d *Debugger) Run(processArgs []string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
+	glog.Infof("launching process with args: %v", processArgs)
 	process, err := proctl.Launch(processArgs)
 	if err != nil {
 		return fmt.Errorf("couldn't launch process: %s", err)
@@ -59,32 +61,34 @@ func (d *Debugger) Run(processArgs []string) error {
 
 	ticker := time.NewTicker(d.fullNotifyInterval)
 
+runLoop:
 	for {
 		select {
 		case command := <-d.Commands:
 			handler, hasHandler := d.commandHandlers[command.Name]
 			if !hasHandler {
-				// TODO: error handling
-				fmt.Printf("no handler for command %s\n", command.Name)
+				glog.Errorf("no handler for command %s", command.Name)
 				continue
 			}
 
+			glog.V(1).Infof("handling command: %s", command.Name)
 			err = handler(command)
 			if err != nil {
-				// TODO: error handling
-				fmt.Printf("handler error: %s\n", err)
+				glog.Errorf("handler error: %s", err)
 			}
 		case <-ticker.C:
+			glog.V(5).Info("performing full notify")
 			// TODO(danmace): audit concurrency; this stuff should all be reads.
 			// TODO(danmace): drive this from events deeper down in proctl.
 			d.NotifyBreakPointsUpdated()
 			d.NotifyThreadsUpdated()
-			// TODO(danmace): this should only need to happen once or on demand.
-			d.NotifyFilesUpdated()
+			d.NotifyProcessUpdated()
 		case <-d.shutdown:
-			return nil
+			break runLoop
 		}
 	}
+	glog.Info("debugger stopping")
+	return nil
 }
 
 func (d *Debugger) sendMessage(body string) {
@@ -97,19 +101,19 @@ func (d *Debugger) sendMessage(body string) {
 }
 
 func (d *Debugger) Detach(command *api.Command) error {
-	if d.process.Exited() {
-		return nil
-	}
 	d.sendMessage("Detaching from process")
-	return sys.PtraceDetach(d.process.Process.Pid)
+	pid := d.process.Process.Pid
+	err := sys.PtraceDetach(pid)
+	glog.V(0).Infof("attempted detach from %d with result: %v", pid, err)
+	return err
 }
 
 func (d *Debugger) Kill(command *api.Command) error {
-	if d.process.Exited() {
-		return nil
-	}
 	d.sendMessage("Killing process")
-	return d.process.Process.Kill()
+	pid := d.process.Process.Pid
+	err := d.process.Process.Kill()
+	glog.V(0).Infof("attempted kill of %d with result: %v", pid, err)
+	return err
 }
 
 func (d *Debugger) ClearBreakPoints(command *api.Command) error {
@@ -266,15 +270,31 @@ func (d *Debugger) NotifyThreadsUpdated() error {
 	return nil
 }
 
-func (d *Debugger) NotifyFilesUpdated() error {
+func (d *Debugger) NotifyProcessUpdated() error {
 	files := []string{}
 	for f := range d.process.GoSymTable.Files {
 		files = append(files, f)
 	}
+	status := d.process.Status()
+	statusCode := uint32(0)
+	exited := false
+	if status != nil {
+		glog.Infof("status=%+v", status)
+		statusCode = uint32(*status)
+		exited = status.Exited()
+	} else {
+		exited = true
+		glog.Info("no status")
+	}
+
 	d.Events <- &api.Event{
-		Name: api.FilesUpdated,
-		FilesUpdated: &api.FilesUpdatedData{
-			Files: files,
+		Name: api.ProcessUpdated,
+		ProcessUpdated: &api.ProcessUpdatedData{
+			Process: &api.Process{
+				Files:  files,
+				Status: statusCode,
+				Exited: exited,
+			},
 		},
 	}
 	return nil

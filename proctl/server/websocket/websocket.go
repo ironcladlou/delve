@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/golang/glog"
 	gws "github.com/gorilla/websocket"
 
 	"github.com/derekparker/delve/api"
@@ -23,15 +24,16 @@ func (s *WebsocketServer) Run() error {
 	http.HandleFunc("/", s.handleSocket)
 	// TODO: hack in shutdown based on a channel
 	// TODO: could serialize access with a channel
-	fmt.Printf("websocket server listening at %s\n", s.URL())
+	glog.Infof("websocket server listening at %s\n", s.URL())
 	err := http.ListenAndServe(fmt.Sprintf("%s:%d", s.ListenAddr, s.ListenPort), nil)
 	if err != nil {
-		return fmt.Errorf("error starting server: %s", err)
+		return err
 	}
 
 	for {
 		select {
 		case <-s.Shutdown:
+			glog.Info("websocket server stopping")
 			return nil
 		}
 	}
@@ -49,7 +51,7 @@ func (s *WebsocketServer) handleSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// TODO: error handling
-		fmt.Println(err)
+		glog.Errorf("error upgrading connection: %v", err)
 		return
 	}
 
@@ -66,7 +68,7 @@ func (s *WebsocketServer) readCommands(conn *gws.Conn) {
 		}
 
 		if messageType != gws.TextMessage {
-			// TODO: error handling
+			glog.Errorf("received invalid message type %s", messageType)
 			continue
 		}
 
@@ -74,8 +76,7 @@ func (s *WebsocketServer) readCommands(conn *gws.Conn) {
 
 		var command *api.Command
 		if err := dec.Decode(&command); err != nil {
-			// TODO: error handling
-			fmt.Println(err)
+			glog.Errorf("couldn't decode command: %s", err)
 			continue
 		}
 
@@ -89,12 +90,11 @@ func (s *WebsocketServer) writeEvents(conn *gws.Conn) {
 		case event := <-s.Debugger.Events:
 			json, err := json.Marshal(event)
 			if err != nil {
-				fmt.Printf("error marshalling event: %s", err)
+				glog.Errorf("error marshalling event: %s", err)
 				continue
 			}
 			if err := conn.WriteMessage(gws.TextMessage, json); err != nil {
-				// TODO: error handling
-				fmt.Printf("error writing event: %s\n", err)
+				glog.Errorf("error writing event: %s", err)
 			}
 		}
 	}

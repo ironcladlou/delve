@@ -7,6 +7,8 @@ type DebuggerState struct {
 	BreakPoint *BreakPoint `json:"breakPoint,omitempty"`
 	// CurrentThread is the currently selected debugger thread.
 	CurrentThread *Thread `json:"currentThread,omitempty"`
+	// Exited indicates whether the debugged process has exited.
+	Exited bool `json:"exited"`
 }
 
 // BreakPoint addresses a location at which process execution may be
@@ -29,8 +31,6 @@ type BreakPoint struct {
 type Thread struct {
 	// ID is a unique identifier for the thread.
 	ID int `json:"id"`
-	// State is the execution state of the thread.
-	State ThreadState `json:"state"`
 	// PC is the current program counter for the thread.
 	PC uint64 `json:"pc"`
 	// File is the file for the program counter.
@@ -39,14 +39,6 @@ type Thread struct {
 	Line int `json:"line"`
 	// Function is function information at the program counter. May be nil.
 	Function *Function `json:"function,omitempty"`
-}
-
-// ThreadState represents the execution state of a thread.
-type ThreadState struct {
-	Exited     bool `json:"exited"`
-	ExitStatus int  `json:"exitStatus"`
-	Stopped    bool `json:"stopped"`
-	StopSignal int  `json:"stopSignal"`
 }
 
 // Function represents thread-scoped function information.

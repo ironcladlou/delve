@@ -52,17 +52,21 @@ func withTestClient(name string, t *testing.T, fn func(c service.Client)) {
 
 func TestClientServer_exit(t *testing.T) {
 	withTestClient(continuetestprog, t, func(c service.Client) {
-		state, err := c.Continue()
+		state, err := c.GetState()
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+		if e, a := false, state.Exited; e != a {
+			t.Fatalf("Expected exited %v, got %v", e, a)
+		}
+		state, err = c.Continue()
 		if err != nil {
 			t.Fatalf("Unexpected error: %v, state: %#v", err, state)
 		}
 		if state.CurrentThread == nil {
 			t.Fatalf("Expected CurrentThread")
 		}
-		if e, a := 0, state.CurrentThread.State.ExitStatus; e != a {
-			t.Fatalf("Expected exit status %d, got %d", e, a)
-		}
-		if e, a := true, state.CurrentThread.State.Exited; e != a {
+		if e, a := true, state.Exited; e != a {
 			t.Fatalf("Expected exited %v, got %v", e, a)
 		}
 	})
@@ -91,29 +95,12 @@ func TestClientServer_step(t *testing.T) {
 	})
 }
 
-func TestClientServer_next(t *testing.T) {
-	testcases := []struct {
-		begin, end int
-	}{
-		{19, 20},
-		{20, 23},
-		{23, 24},
-		{24, 26},
-		{26, 31},
-		{31, 23},
-		{23, 24},
-		{24, 26},
-		{26, 31},
-		{31, 23},
-		{23, 24},
-		{24, 26},
-		{26, 27},
-		{27, 34},
-		{34, 41},
-		{41, 40},
-		{40, 41},
-	}
+//func TestClientServer_next(t *testing.T) {
+type nextTest struct {
+	begin, end int
+}
 
+func testnext(testcases []nextTest, initialLocation string, t *testing.T) {
 	fp, err := filepath.Abs(testnextprog)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +108,7 @@ func TestClientServer_next(t *testing.T) {
 	fp = fp + ".go"
 
 	withTestClient(testnextprog, t, func(c service.Client) {
-		bp, err := c.CreateBreakPoint(&api.BreakPoint{File: fp, Line: testcases[0].begin})
+		bp, err := c.CreateBreakPoint(&api.BreakPoint{FunctionName: initialLocation})
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
@@ -152,6 +139,43 @@ func TestClientServer_next(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestNextGeneral(t *testing.T) {
+	testcases := []nextTest{
+		{17, 19},
+		{19, 20},
+		{20, 23},
+		{23, 24},
+		{24, 26},
+		{26, 31},
+		{31, 23},
+		{23, 24},
+		{24, 26},
+		{26, 31},
+		{31, 23},
+		{23, 24},
+		{24, 26},
+		{26, 27},
+		{27, 34},
+	}
+	testnext(testcases, "main.testnext", t)
+}
+
+func TestNextGoroutine(t *testing.T) {
+	testcases := []nextTest{
+		{46, 47},
+		{47, 42},
+	}
+	testnext(testcases, "main.testgoroutine", t)
+}
+
+func TestNextFunctionReturn(t *testing.T) {
+	testcases := []nextTest{
+		{13, 14},
+		{14, 35},
+	}
+	testnext(testcases, "main.helloworld", t)
 }
 
 func TestClientServer_breakpointInMainThread(t *testing.T) {

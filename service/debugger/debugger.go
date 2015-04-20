@@ -179,7 +179,7 @@ func (d *Debugger) State() (*api.DebuggerState, error) {
 		}
 
 		var breakpoint *api.BreakPoint
-		bp := p.CurrentBreakpoint
+		bp := p.CurrentBreakpoint()
 		if bp != nil {
 			breakpoint = convertBreakPoint(bp)
 		}
@@ -187,6 +187,7 @@ func (d *Debugger) State() (*api.DebuggerState, error) {
 		state = &api.DebuggerState{
 			BreakPoint:    breakpoint,
 			CurrentThread: thread,
+			Exited:        p.Exited(),
 		}
 		return nil
 	})
@@ -471,30 +472,12 @@ func convertThread(th *proctl.ThreadContext) *api.Thread {
 		}
 	}
 
-	exited := false
-	exitStatus := 0
-	stopped := false
-	stopSignal := 0
-	status := th.Status
-	if status != nil {
-		exited = status.Exited()
-		exitStatus = status.ExitStatus()
-		stopped = status.Stopped()
-		stopSignal = int(status.StopSignal())
-	}
-
 	return &api.Thread{
 		ID:       th.Id,
 		PC:       pc,
 		File:     file,
 		Line:     line,
 		Function: function,
-		State: api.ThreadState{
-			Exited:     exited,
-			ExitStatus: exitStatus,
-			Stopped:    stopped,
-			StopSignal: stopSignal,
-		},
 	}
 }
 

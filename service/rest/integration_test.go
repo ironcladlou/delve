@@ -3,6 +3,7 @@ package rest
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -128,7 +129,7 @@ func testnext(testcases []nextTest, initialLocation string, t *testing.T) {
 				t.Fatalf("Program not stopped at correct spot expected %d was %s:%d", tc.begin, filepath.Base(fp), state.CurrentThread.Line)
 			}
 
-			t.Logf("Next for scenario %#v", tc)
+			fmt.Printf("Scenario: %#v\n", tc)
 			state, err = c.Next()
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)

@@ -26,6 +26,7 @@ const (
 type OSProcessDetails interface{}
 
 func (dbp *DebuggedProcess) requestManualStop() (err error) {
+	fmt.Println("requestManualStop()")
 	return sys.Kill(dbp.Pid, sys.SIGSTOP)
 }
 

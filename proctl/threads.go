@@ -55,6 +55,7 @@ func (thread *ThreadContext) CurrentPC() (uint64, error) {
 // we step over any breakpoints. It will restore the instruction,
 // step, and then restore the breakpoint and continue.
 func (thread *ThreadContext) Continue() error {
+	fmt.Printf("TC.Continue(%#v)\n", thread.Id)
 	pc, err := thread.CurrentPC()
 	if err != nil {
 		return err
@@ -64,11 +65,14 @@ func (thread *ThreadContext) Continue() error {
 	// if so, single step over it before continuing.
 	if _, ok := thread.Process.BreakPoints[pc-1]; ok {
 		err := thread.Step()
+		fmt.Printf("TC.Continue()::step(%#v)=%#v\n", thread.Id, err)
 		if err != nil {
 			return fmt.Errorf("could not step %s", err)
 		}
 	}
-	return thread.resume()
+	e := thread.resume()
+	fmt.Printf("TC.Continue()::resume(%d)=%#v\n", thread.Id, e)
+	return e
 }
 
 // Single steps this thread a single instruction, ensuring that
@@ -158,6 +162,7 @@ func (thread *ThreadContext) Clear(addr uint64) (*BreakPoint, error) {
 // and setting a breakpoint at them. Once we've set a breakpoint at each
 // potential line, we continue the thread.
 func (thread *ThreadContext) Next() (err error) {
+	fmt.Printf("Next(%d)\n", thread.Id)
 	curpc, err := thread.CurrentPC()
 	if err != nil {
 		return err
@@ -206,7 +211,6 @@ func (thread *ThreadContext) next(curpc uint64, fde *frame.FrameDescriptionEntry
 	if err != nil {
 		return err
 	}
-
 	ret, err := thread.ReturnAddress()
 	if err != nil {
 		return err

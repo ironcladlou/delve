@@ -453,7 +453,6 @@ func convertThread(th *proctl.ThreadContext) *api.Thread {
 				Args:   []api.Variable{},
 				Locals: []api.Variable{},
 			}
-
 			if vars, err := th.LocalVariables(); err == nil {
 				for _, v := range vars {
 					function.Locals = append(function.Locals, convertVar(v))

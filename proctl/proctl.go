@@ -185,6 +185,7 @@ func (dbp *DebuggedProcess) FindLocation(str string) (uint64, error) {
 // Sends out a request that the debugged process halt
 // execution. Sends SIGSTOP to all threads.
 func (dbp *DebuggedProcess) RequestManualStop() error {
+	fmt.Println("RequestManualStop()")
 	dbp.halt = true
 	err := dbp.requestManualStop()
 	if err != nil {
@@ -277,11 +278,13 @@ func (dbp *DebuggedProcess) next() error {
 	var goroutineExiting bool
 	for _, th := range dbp.Threads {
 		if th.blocked() { // Continue threads that aren't running go code.
+			fmt.Printf("DBP.next(%d)::blocked/continuing\n", th.Id)
 			if err := th.Continue(); err != nil {
 				return err
 			}
 			continue
 		}
+		fmt.Printf("DBP.next(%d)::next/continuing\n", th.Id)
 		if err = th.Next(); err != nil {
 			if err, ok := err.(GoroutineExitingError); ok {
 				if err.goid == curg.Id {
@@ -297,7 +300,11 @@ func (dbp *DebuggedProcess) next() error {
 	}
 
 	for {
+		fmt.Printf("DBP.next(%d) waiting for bps:\n", dbp.CurrentThread.Id)
+		fmt.Printf("DBP.next(%d) thread=%#v %#v\n", dbp.CurrentThread.Id, dbp.CurrentThread, dbp.CurrentThread.CurrentBreakpoint)
+		dbp.printBreakpoints()
 		thread, err := trapWait(dbp, -1)
+		fmt.Printf("DBP.next(%d) wait returned\n", dbp.CurrentThread.Id)
 		if err != nil {
 			return err
 		}
@@ -329,6 +336,15 @@ func (dbp *DebuggedProcess) next() error {
 	return dbp.Halt()
 }
 
+func (dbp *DebuggedProcess) printBreakpoints() {
+	for _, bp := range dbp.HWBreakPoints {
+		fmt.Printf("bp: %#v\n", bp)
+	}
+	for _, bp := range dbp.BreakPoints {
+		fmt.Printf("bp: %#v\n", bp)
+	}
+}
+
 // Resume process.
 func (dbp *DebuggedProcess) Continue() error {
 	for _, thread := range dbp.Threads {
@@ -342,6 +358,7 @@ func (dbp *DebuggedProcess) Continue() error {
 
 func (dbp *DebuggedProcess) resume() error {
 	thread, err := trapWait(dbp, -1)
+	fmt.Printf("DBP.resume(%d)\n", thread.Id)
 	if err != nil {
 		return err
 	}
@@ -429,8 +446,10 @@ func (dbp *DebuggedProcess) GoroutinesInfo() ([]*G, error) {
 func (dbp *DebuggedProcess) Halt() (err error) {
 	for _, th := range dbp.Threads {
 		if err := th.Halt(); err != nil {
+			fmt.Printf("DBP.Halt(%d)\n", th.Id)
 			return err
 		}
+		fmt.Printf("DBP.Halt(%d)=%#v\n", th.Id, err)
 	}
 	return nil
 }

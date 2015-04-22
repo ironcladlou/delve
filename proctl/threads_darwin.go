@@ -18,6 +18,7 @@ func (t *ThreadContext) Halt() error {
 	if kret != C.KERN_SUCCESS {
 		return fmt.Errorf("could not suspend thread %d", t.Id)
 	}
+	fmt.Printf("TC.Halt(%d)\n", t.Id)
 	return nil
 }
 
@@ -36,13 +37,18 @@ func (t *ThreadContext) singleStep() error {
 
 func (t *ThreadContext) resume() error {
 	// TODO(dp) set flag for ptrace stops
-	if PtraceCont(t.Process.Pid, 0) == nil {
+	fmt.Printf("TC.resume(%d)\n", t.Id)
+	if err := PtraceCont(t.Process.Pid, 0); err == nil {
+		fmt.Printf("TC.resume::PtraceCont(%d)\n", t.Id)
 		return nil
+	} else {
+		fmt.Printf("TC.resume::PtraceCont(%d)=%#v\n", t.Id, err)
 	}
 	kret := C.resume_thread(t.os.thread_act)
 	if kret != C.KERN_SUCCESS {
 		return fmt.Errorf("could not continue thread")
 	}
+	fmt.Printf("TC.resume::resume_thread(%d)=%#v\n", t.Id, kret)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package proctl
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -233,11 +234,13 @@ func testnext(testcases []nextTest, initialLocation string, t *testing.T) {
 		p.CurrentThread.SetPC(bp.Addr)
 
 		f, ln := currentLineNumber(p, t)
+		fmt.Printf("test cases: %#v\n", testcases)
 		for _, tc := range testcases {
 			if ln != tc.begin {
 				t.Fatalf("Program not stopped at correct spot expected %d was %s:%d", tc.begin, filepath.Base(f), ln)
 			}
 
+			fmt.Printf("Scenario: %#v\n", tc)
 			assertNoError(p.Next(), t, "Next() returned an error")
 
 			f, ln = currentLineNumber(p, t)
